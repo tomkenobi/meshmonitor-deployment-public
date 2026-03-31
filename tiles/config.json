@@ -49,17 +49,6 @@
           49.02403
         ]
       }
-    },
-    "overview": {
-      "style": "styles/overview/style.json",
-      "tilejson": {
-        "bounds": [
-          9.52678,
-          46.36851,
-          17.16273,
-          49.02403
-        ]
-      }
     }
   },
   "data": {
