@@ -1,0 +1,9 @@
+{
+"type": "FeatureCollection",
+"name": "example-points",
+"features": [
+{ "type": "Feature", "properties": { "name": "Example Point 1", "marker-size": "small" }, "geometry": { "type": "Point", "coordinates": [ 15.4395, 47.0707 ] } },
+{ "type": "Feature", "properties": { "name": "Example Point 2", "marker-size": "small" }, "geometry": { "type": "Point", "coordinates": [ 15.4500, 47.0650 ] } },
+{ "type": "Feature", "properties": { "name": "Example Point 3", "marker-size": "small" }, "geometry": { "type": "Point", "coordinates": [ 15.4250, 47.0800 ] } }
+]
+}

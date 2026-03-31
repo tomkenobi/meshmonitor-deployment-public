@@ -1,0 +1,7 @@
+{
+"type": "FeatureCollection",
+"name": "example-area",
+"features": [
+{ "type": "Feature", "properties": { "name": "Example Area" }, "geometry": { "type": "Polygon", "coordinates": [[ [15.43, 47.06], [15.46, 47.06], [15.46, 47.08], [15.43, 47.08], [15.43, 47.06] ]] } }
+]
+}

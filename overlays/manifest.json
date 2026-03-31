@@ -1,9 +1,9 @@
 {
   "layers": [
     {
-      "id": "leuchttuerme",
-      "name": "Leuchttürme (Sammelstellen)",
-      "filename": "leuchttuerme.geojson",
+      "id": "example-points",
+      "name": "Example Points",
+      "filename": "example-points.geojson",
       "visible": true,
       "style": {
         "color": "#e74c3c",
@@ -15,15 +15,15 @@
       "updatedAt": 1774820487353
     },
     {
-      "id": "notstromaggregate",
-      "name": "Notstromaggregate",
-      "filename": "notstromaggregate.geojson",
+      "id": "example-area",
+      "name": "Example Area",
+      "filename": "example-area.geojson",
       "visible": true,
       "style": {
         "color": "#3498db",
         "opacity": 1,
-        "weight": 1,
-        "fillOpacity": 0.3
+        "weight": 2,
+        "fillOpacity": 0.2
       },
       "createdAt": 1774820487353,
       "updatedAt": 1774820487353
