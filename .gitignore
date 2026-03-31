@@ -10,3 +10,9 @@
 # QGIS temporäre Dateien
 *.qmd
 *.qgz~
+
+# Deprecated / nicht mehr verwendet
+mbtileserver_deprecated/
+
+# Feature Requests (lokal behalten, nicht im Repo)
+FEATURE-REQUEST-*
