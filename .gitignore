@@ -1,0 +1,12 @@
+# MBTiles (zu groß für Git, separat bereitstellen)
+*.mbtiles
+
+# OSM-Rohdaten
+*.osm.pbf
+
+# Umgebungsvariablen
+.env
+
+# QGIS temporäre Dateien
+*.qmd
+*.qgz~

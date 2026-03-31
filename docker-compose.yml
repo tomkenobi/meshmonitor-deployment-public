@@ -1,0 +1,48 @@
+services:
+  serial-bridge:
+    image: ghcr.io/yeraze/meshtastic-serial-bridge:latest
+    container_name: meshtastic-serial-bridge
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+    ports:
+      - "4403:4403"
+    restart: unless-stopped
+    environment:
+      - SERIAL_DEVICE=/dev/ttyACM0
+      - BAUD_RATE=115200
+      - TCP_PORT=4403
+
+  meshmonitor:
+    image: ghcr.io/yeraze/meshmonitor:latest
+    container_name: meshmonitor
+    ports:
+      - "8080:3001"
+    restart: unless-stopped
+    volumes:
+      - meshmonitor-data:/data
+    env_file:
+      - ./.env
+    environment:
+      - NODE_ENV=development
+      - TZ=Europe/Vienna
+      - ALLOWED_ORIGINS=http://localhost:8080,https://linuxmint.kingfisher-gopher.ts.net
+      - MESHTASTIC_NODE_IP=serial-bridge
+    depends_on:
+      - serial-bridge
+
+  tileserver:
+    image: maptiler/tileserver-gl-light:latest
+    container_name: meshmonitor-tileserver
+    command: --config /data/config.json
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    volumes:
+      - ./tiles:/data
+    environment:
+      - TZ=Europe/Vienna
+
+volumes:
+  meshmonitor-data:
+    external: true
+    name: meshmonitor-data
