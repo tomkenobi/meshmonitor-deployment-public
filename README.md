@@ -1,312 +1,220 @@
-# MeshMonitor - Offline-Karten Setup
+# MeshMonitor — Offline-Deployment auf Raspberry Pi
 
-Deployment-Anleitung für MeshMonitor mit lokalem Tileserver (tileserver-gl-light) und Vektor-Karten aus MBTiles.
+Deployment-Konfiguration für [MeshMonitor](https://github.com/yeraze/meshmonitor) (v4.1.2) mit lokalem Vector-Tileserver, Caddy-Reverse-Proxy und mDNS-Hostname-Routing. Zielplattform: Raspberry Pi 4/5 mit Docker. Funktioniert vollständig offline (kein Internet, kein bestehendes Netzwerk nötig).
 
-Zielplattform: Raspberry Pi mit Docker. Das Mesh-Netzwerk umfasst 50-60 Nodes, MeshMonitor wird auf einer Handvoll Raspis deployed (nicht pro Node).
+## Architektur
 
-Alternativ kann eine Konfiguration über den [MeshMonitor Configurator](https://meshmonitor.org/configurator.html) generiert werden.
+```
+[Meshtastic-Node] --USB--> [serial-bridge :4403] ---+
+                                                    |
+                          [meshmonitor :3001] <-----+   (intern)
+                                  ^
+                                  | (intern)
+   Browser --http://meshmonitor.local--> [Caddy :80]
+                                                  \
+                                                   +--> /tiles/*  ->  [tileserver :8080]  (intern)
+```
+
+Eine einzige öffentliche URL (`http://meshmonitor.local/`), Caddy macht Path-Routing. `meshmonitor` und `tileserver` haben keine externen Ports — der gesamte Verkehr läuft durch Caddy.
+
+**Warum mDNS-Hostname statt fester IP:** Identisches Image lässt sich auf jedem Pi deployen, MapLibre-Style braucht keine pro-Pi-Anpassung. Tile-, Sprite- und Glyph-URLs zeigen alle auf denselben Hostnamen — vermeidet das CSP-Problem (siehe unten).
 
 ## Voraussetzungen
 
-- Docker und Docker Compose
-- Meshtastic-Node per USB angeschlossen (`/dev/ttyACM0`)
-- MBTiles-Datei (z.B. `austria.mbtiles`, erstellt mit Tilemaker)
+- Raspberry Pi 4 (4 GB) oder Pi 5
+- Docker + Docker Compose
+- Meshtastic-Node per USB
+- `austria.mbtiles` (separat, **nicht im Repo** — zu groß)
 
-## Verzeichnisstruktur
-
-```
-meshmonitor/
-├── .env                        # Optionale Umgebungsvariablen
-├── docker-compose.yml          # Docker Compose für alle Services
-├── README.md
-├── tiles/                      # Tileserver-Daten
-│   ├── config.json             # Tileserver-Konfiguration
-│   ├── austria.mbtiles         # Kartendaten (OpenMapTiles-Schema)
-│   ├── fonts/                  # Glyphen für Kartenbeschriftung
-│   ├── sprites/                # Icons für Kartenstile
-│   └── styles/                 # Kartenstile
-│       ├── bright/
-│       ├── dark-matter/
-│       ├── fiord/
-│       ├── overview/
-│       └── positron/
-└── overlays/                   # QGIS-Projekte und GeoJSON-Overlays
-```
-
-## Deployment
-
-### 1. Container starten
+## Schnellstart
 
 ```bash
-cd meshmonitor
+git clone <repo> ~/meshmonitor
+cd ~/meshmonitor
+
+# MBTiles separat reinkopieren
+cp /pfad/zu/austria.mbtiles tiles/
+
+# udev-Regel (siehe unten) installieren, dann:
 docker compose up -d
+
+# Browser: http://meshmonitor.local/
 ```
 
-Das startet drei Container:
+## Container-Stack (`docker-compose.yml`)
 
-| Container | Port | Funktion |
-|---|---|---|
-| `meshtastic-serial-bridge` | 4403 | USB-zu-TCP Bridge für Meshtastic-Node |
-| `meshmonitor` | 8080 | MeshMonitor Weboberfläche |
-| `meshmonitor-tileserver` | 8081 | Tileserver GL Light (Vektor-Karten) |
+| Container | Image | Funktion | Externer Port |
+|---|---|---|---|
+| `meshmonitor-caddy` | `caddy:2-alpine` | Reverse-Proxy | **80** |
+| `meshmonitor` | `ghcr.io/yeraze/meshmonitor:latest` | Web-UI + Backend | — (intern) |
+| `meshmonitor-tileserver` | `maptiler/tileserver-gl-light:latest` | Vector-Tile-Server | — (intern) |
+| `meshtastic-serial-bridge` | `ghcr.io/yeraze/meshtastic-serial-bridge:latest` | USB→TCP für Node | 4403 |
 
-### 2. Custom Tile Server einrichten
+## Caddy-Konfiguration (`Caddyfile`)
 
-In MeshMonitor unter **Settings > Map > Add Custom Tile Server**:
+```caddy
+:80 {
+    encode gzip
 
-| Feld | Wert |
-|---|---|
-| **Name** | Austria (oder gewünschter Name) |
-| **Tile URL** | `http://localhost:8081/data/v3/{z}/{x}/{y}.pbf` |
-| **Attribution** | `© OpenStreetMap contributors \| OpenMapTiles` |
+    # Tileserver unter /tiles/* — Prefix wegstrippen
+    handle_path /tiles/* {
+        reverse_proxy meshmonitor-tileserver:8080
+    }
 
-Anschliessend den neuen Tile Server als aktive Karte auswählen.
-
-### 3. Tileserver prüfen
-
-Der Tileserver bietet eine eigene Weboberfläche unter `http://localhost:8081/` mit Vorschau der verfügbaren Styles und Datenquellen.
-
-## Tiles
-
-Tileserver GL Light liefert ausschliesslich Vektor-Tiles (kein serverseitiges Rastern). Das Styling der Karte wird von MeshMonitor clientseitig angewandt und kann nicht beeinflusst werden.
-
-Tile-URL: `http://localhost:8081/data/v3/{z}/{x}/{y}.pbf`
-
-## Konfiguration
-
-### Tileserver (config.json)
-
-Die Datei `tiles/config.json` definiert die Datenquellen und Styles. Die Datenquelle muss als `v3` benannt sein, da MeshMonitor diesen Identifier erwartet.
-
-### Styles anpassen
-
-Jeder Style verweist in seiner `style.json` auf die Datenquelle:
-
-```json
-"sources": {
-  "openmaptiles": {
-    "type": "vector",
-    "url": "mbtiles://{v3}"
-  }
+    # Alles andere → MeshMonitor
+    handle {
+        reverse_proxy meshmonitor:3001
+    }
 }
 ```
 
-Der Identifier `v3` muss mit dem Eintrag in `config.json` übereinstimmen.
+`handle_path` strippt das `/tiles/`-Prefix vor Weiterleitung an den Tileserver.
 
-### Umgebungsvariablen (.env)
+## MeshMonitor einrichten
 
-Die `.env`-Datei wird von MeshMonitor geladen. Aktuell wird sie für optionale Konfiguration wie eine alternative Meshtastic-Node-IP genutzt (`MESHTASTIC_NODE_IP`).
+Nach `docker compose up -d` Browser auf `http://meshmonitor.local/` öffnen, einloggen (Default-Credentials siehe MeshMonitor-Doku — sofort ändern).
 
-## Netzwerkzugriff (WLAN Access Point)
+### Source (Multi-Source-Architektur)
 
-Im Einsatzszenario fungiert der Raspi als eigenständiger WLAN Access Point. Damit ist kein bestehendes Netzwerk und kein Internet erforderlich – Strom und USB-Node reichen.
+**Settings → Sources → Add:**
 
-### Einsatz-Setup
+| Feld | Wert |
+|---|---|
+| Type | `TCP` |
+| Host | `meshtastic-serial-bridge` |
+| Port | `4403` |
 
-```
-[Meshtastic Node am Dach] ~~~Funk~~~ [Node im Stabsraum] --USB--> [Raspi] ))WLAN((  [Laptops/Tablets]
-```
+### Custom Tile Server
 
-### Access Point einrichten
+**Settings → Map → Custom Tile Servers → Add:**
 
-Pakete installieren (einmalig, mit Internetzugang):
+| Feld | Wert |
+|---|---|
+| Name | Austria |
+| Tile URL | `http://meshmonitor.local/tiles/data/v3/{z}/{x}/{y}.pbf` |
+| Max Zoom | `14` |
 
-```bash
-sudo apt install hostapd dnsmasq
-sudo systemctl unmask hostapd
-```
+### MapLibre-Style
 
-WLAN-Interface konfigurieren (`/etc/dhcpcd.conf`):
+**Settings → Map Styles → Upload Style** — die vier vorbereiteten Files in `tiles/styles-meshmonitor/` (`bright.json`, `dark-matter.json`, `fiord.json`, `positron.json`) hochladen. Alle URLs in den Files zeigen bereits auf `http://meshmonitor.local/tiles/...`.
 
-```
-interface wlan0
-    static ip_address=10.0.0.1/24
-    nohook wpa_supplicant
-```
-
-DHCP-Server (`/etc/dnsmasq.conf`):
-
-```
-interface=wlan0
-dhcp-range=10.0.0.10,10.0.0.50,255.255.255.0,24h
-# Kein Default Gateway verteilen, damit LAN-Internet parallel funktioniert
-dhcp-option=3
-```
-
-Access Point (`/etc/hostapd/hostapd.conf`):
-
-```
-interface=wlan0
-ssid=MeshMonitor
-hw_mode=g
-channel=7
-wmm_enabled=0
-macaddr_acl=0
-auth_algs=1
-wpa=2
-wpa_passphrase=<SICHERES-PASSWORT>
-wpa_key_mgmt=WPA-PSK
-rsn_pairwise=CCMP
-```
-
-Hostapd-Konfiguration aktivieren (`/etc/default/hostapd`):
-
-```
-DAEMON_CONF="/etc/hostapd/hostapd.conf"
-```
-
-Dienste aktivieren und starten:
-
-```bash
-sudo systemctl enable hostapd dnsmasq
-sudo systemctl start hostapd dnsmasq
-```
-
-### ALLOWED_ORIGINS anpassen
-
-In `docker-compose.yml` die feste Access-Point-IP eintragen:
-
-```yaml
-environment:
-  - ALLOWED_ORIGINS=http://localhost:8080,http://10.0.0.1:8080
-```
-
-### Zugriff im Einsatz
-
-1. Raspi mit Strom versorgen und Meshtastic-Node per USB anschliessen
-2. Laptop/Tablet mit WLAN `MeshMonitor` verbinden
-3. Im Browser `http://10.0.0.1:8080` öffnen
-
-Kein Internet, kein bestehendes Netzwerk, kein HTTPS nötig.
+> [!important] CSP-Falle bei Style-URL-Mismatch
+>
+> MeshMonitor whitelistet im CSP-Header **nur** den Hostnamen, der unter „Custom Tile Server" eingetragen ist. Wenn die Style-Datei zusätzliche URLs auf einem **anderen** Hostnamen verwendet (z.B. Sprite oder Glyphs auf Container-internem `meshmonitor-tileserver:8080`), blockt der Browser diese Requests **ohne UI-Rückmeldung** → Karte bleibt grau.
+>
+> Lösung: Tile-, Sprite- und Glyph-URLs müssen **denselben Hostnamen** verwenden. Die mitgelieferten Style-Dateien sind entsprechend vorbereitet.
 
 ## USB-Geräteerkennung (udev)
 
-Standardmässig wird die Node als `/dev/ttyACM0` erkannt. Für eine zuverlässige Zuordnung unabhängig von der USB-Reihenfolge kann eine udev-Regel einen festen Symlink `/dev/meshtastic` erstellen.
+Damit die Node unabhängig von der USB-Reihenfolge gefunden wird:
 
-Unterstützte Geräte:
-
-| Gerät | Chip | idVendor | idProduct |
-|---|---|---|---|
-| LilyGO T-Deck Plus | ESP32-S3 (nativ USB) | `303a` | `1001` |
-| Heltec MeshPocket | ESP32-S3 (nativ USB) | `303a` | `1001` |
-| Seeed SenseCAP T1000-E | nRF52840 (nativ USB) | `239a` | `8029` |
-
-udev-Regel erstellen (`/etc/udev/rules.d/99-meshtastic.rules`):
+`/etc/udev/rules.d/99-meshtastic.rules`:
 
 ```
 # ESP32-S3 (T-Deck Plus, MeshPocket)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic"
-
 # nRF52840 (SenseCAP T1000-E)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="8029", SYMLINK+="meshtastic"
 ```
-
-Regel aktivieren:
 
 ```bash
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Anschliessend in `docker-compose.yml` den festen Symlink verwenden:
+Im Compose mountet `/dev/meshtastic` als `/dev/ttyACM0` in den Container.
 
-```yaml
-devices:
-  - /dev/meshtastic:/dev/ttyACM0
-environment:
-  - SERIAL_DEVICE=/dev/ttyACM0
+## WLAN Access Point (Einsatz-Modus)
+
+Im Einsatz fungiert der Pi als eigenständiger WLAN-AP. Tablets/Laptops verbinden sich direkt mit dem Pi, kein Internet nötig. Konfiguration via NetworkManager (Pi-OS Bookworm/Trixie default):
+
+```bash
+sudo nmcli connection add type wifi ifname wlan0 con-name "MeshMonitor-AP" \
+    autoconnect yes ssid "MeshMonitor"
+sudo nmcli connection modify "MeshMonitor-AP" \
+    802-11-wireless.mode ap \
+    802-11-wireless.band bg \
+    802-11-wireless.channel 7 \
+    ipv4.method shared \
+    ipv4.addresses 10.42.0.1/24 \
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "<SICHERES-PASSWORT>"
 ```
 
-**Hinweis:** Die IDs basieren auf den typischen Chips dieser Geräte. Zur Verifizierung das Gerät anschliessen und `udevadm info -a /dev/ttyACM0 | grep -E "idVendor|idProduct"` ausführen.
+`ipv4.method shared` startet automatisch DHCP. Tablets bekommen IPs aus `10.42.0.0/24`, der Pi ist `10.42.0.1`.
 
-## GeoJSON-Overlays vorkonfigurieren (Deployment)
+Im AP-Mode bleibt der Pi via Ethernet wartbar — Pi 4 kann AP über `wlan0` und Internet/Wartung über `eth0` parallel betreiben.
 
-Für ein einheitliches Deployment auf mehreren Raspis können GeoJSON-Overlays vorab ins Volume gelegt werden. MeshMonitor erkennt Dateien in `/data/geojson/` automatisch (Auto-Discovery).
+## GeoJSON-Overlays
 
-Die Overlays werden über eine `manifest.json` gesteuert, die Anzeigename, Farbe und Sichtbarkeit definiert. Es können sprechende Dateinamen und IDs verwendet werden (keine UUIDs nötig).
+MeshMonitor scannt `/data/geojson/` automatisch. Files dort werden ohne UI-Aktion als Layer erfasst.
 
-Beispiel-Struktur im Volume (`/data/geojson/`):
-
-```
-geojson/
-├── manifest.json
-├── leuchttuerme.geojson
-├── notstromaggregate.geojson
-├── gemeindegrenzen.geojson
-└── hauptverkehrsrouten.geojson
+```bash
+docker cp overlays/example-area.geojson meshmonitor:/data/geojson/
+docker cp overlays/manifest.json meshmonitor:/data/geojson/
 ```
 
-Beispiel `manifest.json`:
+`manifest.json` steuert Anzeigename, Farbe, Sichtbarkeit:
 
 ```json
 {
   "layers": [
     {
-      "id": "leuchttuerme",
-      "name": "Leuchttürme",
-      "filename": "leuchttuerme.geojson",
+      "id": "example-area",
+      "name": "Beispiel-Bereich",
+      "filename": "example-area.geojson",
       "visible": true,
-      "style": {
-        "color": "#e74c3c",
-        "opacity": 1,
-        "weight": 2,
-        "fillOpacity": 0.75
-      },
-      "createdAt": 1774820487353,
-      "updatedAt": 1774820487353
-    },
-    {
-      "id": "notstromaggregate",
-      "name": "Notstromaggregate",
-      "filename": "notstromaggregate.geojson",
-      "visible": true,
-      "style": {
-        "color": "#3498db",
-        "opacity": 1,
-        "weight": 1,
-        "fillOpacity": 0.3
-      },
-      "createdAt": 1774820487353,
-      "updatedAt": 1774820487353
+      "style": { "color": "#3498db", "weight": 2, "fillOpacity": 0.3 }
     }
   ]
 }
 ```
 
-So starten alle Raspis mit identischen, sauber benannten Overlays – ohne manuelle Konfiguration über die UI.
+**Polygon-/Linien-Layer** sind vorzuziehen (skalieren mit Zoom). Punkt-Layer haben fixe Pixelgröße und verdecken bei niedrigem Zoom.
+
+## MBTiles aus OSM-Daten erzeugen (Tilemaker)
+
+```bash
+# OSM-Rohdaten holen
+wget https://download.geofabrik.de/europe/austria-latest.osm.pbf
+
+# Mit Tilemaker (https://github.com/systemed/tilemaker) verarbeiten
+tilemaker --input austria-latest.osm.pbf --output austria.mbtiles \
+    --config config-openmaptiles.json --process process-openmaptiles.lua
+```
+
+Datenquelle in `tiles/config.json` **muss** `v3` heißen — MeshMonitor erwartet diesen Identifier.
 
 ## GeoJSON-Overlays aus MBTiles extrahieren
 
-Aus der `austria.mbtiles` können Vektordaten für Overlays extrahiert werden:
-
 ```bash
-# Alle Hausnummern für ein Gebiet exportieren (zweistufig, da MVT-Driver räumlich nicht direkt filtern kann)
+# Layer extrahieren
 ogr2ogr -f GeoJSON /tmp/alle.geojson -t_srs EPSG:4326 tiles/austria.mbtiles <layername>
-ogr2ogr -f GeoJSON overlays/<output>.geojson -lco COORDINATE_PRECISION=6 -lco RFC7946=YES /tmp/alle.geojson -spat <west> <south> <east> <north>
+
+# Auf Einsatzgebiet zuschneiden
+ogr2ogr -f GeoJSON overlays/<output>.geojson \
+    -lco COORDINATE_PRECISION=6 -lco RFC7946=YES \
+    /tmp/alle.geojson -spat <west> <south> <east> <north>
 ```
 
-Verfügbare Layer in der MBTiles (OpenMapTiles-Schema):
+Verfügbare Layer (OpenMapTiles-Schema): `boundary`, `waterway`, `transportation`, `building`, `water`, `landuse`, `housenumber`, `poi`.
 
-| Layer | Inhalt | Geometrie |
-|---|---|---|
-| `boundary` | Gemeindegrenzen | Linie |
-| `waterway` | Flussverläufe | Linie |
-| `transportation` | Straßen/Verkehrsrouten | Linie |
-| `transportation_name` | Straßennamen | Linie |
-| `building` | Gebäude | Polygon |
-| `water` | Wasserflächen | Polygon |
-| `landuse` | Landnutzung | Polygon |
-| `park` | Parks/Grünflächen | Polygon |
-| `housenumber` | Hausnummern | Punkt |
-| `poi` | Points of Interest | Punkt |
+Beispielgebiet Graz + Umland: `-spat 15.289287 47.009469 15.584722 47.143331`
 
-Einsatzgebiet Graz + Umland: `-spat 15.289287 47.009469 15.584722 47.143331`
+## Update
 
-**Hinweis:** Punkt-Layer (housenumber, poi) eignen sich weniger als Overlay, da die Darstellungsgrösse nicht mit dem Zoom-Level skaliert. Linien- und Polygon-Layer (boundary, waterway, transportation) funktionieren besser.
+```bash
+# Backup vor Update
+docker run --rm -v meshmonitor-data:/data -v "$PWD":/backup alpine \
+    tar czf /backup/meshmonitor-data-$(date +%F).tar.gz -C /data .
+
+# Update
+docker compose pull
+docker compose up -d
+```
 
 ## Hinweise
 
-- Die MBTiles-Datei wurde mit [Tilemaker](https://github.com/systemed/tilemaker) aus OSM-Daten im OpenMapTiles-Schema erzeugt.
-- Bei Änderungen an `config.json` oder den Styles muss der Tileserver neu gestartet werden: `docker compose restart tileserver`
-- Der Tileserver hat CORS standardmässig aktiviert.
-- Bounds in der config.json begrenzen den verfügbaren Kartenausschnitt (aktuell: Österreich).
+- Bei Änderungen an `tiles/config.json` oder den Tileserver-Styles: `docker compose restart tileserver`
+- Bounds in `tiles/config.json` begrenzen den verfügbaren Kartenausschnitt
+- Pi 4 mit High-Endurance microSD ≥ 64 GB empfohlen für Dauerbetrieb
