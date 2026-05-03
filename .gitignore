@@ -16,3 +16,7 @@ mbtileserver_deprecated/
 
 # Feature Requests (lokal behalten, nicht im Repo)
 FEATURE-REQUEST-*
+
+# Backup-Tarballs
+*.tar.gz
+meshmonitor-data-backup-*.tar.gz

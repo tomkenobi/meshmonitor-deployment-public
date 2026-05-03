@@ -1,0 +1,13 @@
+:80 {
+	encode gzip
+
+	# Tileserver unter /tiles/* — strip prefix, weiterleiten an Container
+	handle_path /tiles/* {
+		reverse_proxy meshmonitor-tileserver:8080
+	}
+
+	# Alles andere → MeshMonitor
+	handle {
+		reverse_proxy meshmonitor:3001
+	}
+}

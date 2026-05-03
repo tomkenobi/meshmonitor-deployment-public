@@ -26,7 +26,6 @@ services:
       - NODE_ENV=development
       - TZ=Europe/Vienna
       - ALLOWED_ORIGINS=http://localhost:8080,https://linuxmint.kingfisher-gopher.ts.net
-      - MESHTASTIC_NODE_IP=serial-bridge
     depends_on:
       - serial-bridge
 

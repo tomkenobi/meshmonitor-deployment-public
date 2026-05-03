@@ -31,14 +31,14 @@
     "openmaptiles": {
       "type": "vector",
       "tiles": [
-        "http://meshmonitor-tileserver:8080/data/v3/{z}/{x}/{y}.pbf"
+        "http://meshmonitor.local/tiles/data/v3/{z}/{x}/{y}.pbf"
       ],
       "minzoom": 0,
       "maxzoom": 14
     }
   },
-  "sprite": "http://meshmonitor-tileserver:8080/styles/fiord/sprite",
-  "glyphs": "http://meshmonitor-tileserver:8080/fonts/{fontstack}/{range}.pbf",
+  "sprite": "http://meshmonitor.local/tiles/styles/fiord/sprite",
+  "glyphs": "http://meshmonitor.local/tiles/fonts/{fontstack}/{range}.pbf",
   "layers": [
     {
       "id": "background",
