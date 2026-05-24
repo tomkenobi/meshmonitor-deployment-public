@@ -111,10 +111,12 @@ Damit die Node unabhängig von der USB-Reihenfolge gefunden wird:
 `/etc/udev/rules.d/99-meshtastic.rules`:
 
 ```
-# ESP32-S3 (T-Deck Plus, MeshPocket)
+# ESP32-S3 (Heltec MeshPocket, LilyGO T-Deck Plus)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic"
-# nRF52840 (SenseCAP T1000-E)
+# nRF52840, SenseCAP T1000-E
 SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="8029", SYMLINK+="meshtastic"
+# nRF52840, LilyGO T-Echo (Adafruit-Vendor, eink-Variante)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="4405", SYMLINK+="meshtastic"
 ```
 
 ```bash
@@ -122,7 +124,50 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Im Compose mountet `/dev/meshtastic` als `/dev/ttyACM0` in den Container.
+Im Compose mountet `/dev/meshtastic` als `/dev/ttyACM0` in den Container. Liste erweitern, wann immer eine neue Node hinzukommt — `lsusb` listet die `idVendor:idProduct`-Kombination, sobald die Node am Pi steckt.
+
+## Container-Lifecycle ans Device binden (systemd-Wrapper)
+
+> **Vorfall 2026-05-03 → 2026-05-05:** Der `serial-bridge`-Container ist nach einem kurzen Node-Disconnect mit Exit-Code 137 + `no such file or directory` für `/dev/ttyACM0` in den `failed`-State gegangen. **`restart: unless-stopped` reanimiert in diesem Fall NICHT** — bekannte Docker-Eigenheit bei Device-Mount-Fehlern. Container war 47 Stunden tot, ohne dass irgendwas davon Notiz nahm.
+
+Saubere Lösung: ein systemd-Service als Wrapper, der den Container-Lifecycle direkt an das Device-Lifecycle koppelt. Wenn der `/dev/meshtastic`-Symlink verschwindet (Node abgesteckt), stoppt systemd den Container automatisch. Wenn das Device wieder da ist, startet systemd den Container automatisch.
+
+`/etc/systemd/system/meshtastic-serial-bridge.service`:
+
+```ini
+[Unit]
+Description=Meshtastic Serial Bridge Container
+Requires=docker.service dev-meshtastic.device
+After=docker.service dev-meshtastic.device
+BindsTo=dev-meshtastic.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/tomkenobi/meshmonitor
+ExecStart=/usr/bin/docker compose up -d serial-bridge
+ExecStop=/usr/bin/docker compose stop serial-bridge
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Aktivieren:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now meshtastic-serial-bridge.service
+```
+
+`BindsTo=dev-meshtastic.device` ist der entscheidende Direktiv: systemd beobachtet den udev-Symlink `/dev/meshtastic` und triggert Service-Lifecycle-Events synchron mit dem Device. **Voraussetzung:** udev-Regel oben erzeugt diesen Symlink für die jeweilige Node-Vendor:Product-Kombination.
+
+**Verifikations-Test:**
+1. Node abstecken → `docker ps` zeigt serial-bridge gestoppt
+2. Node wieder anstecken → `docker ps` zeigt serial-bridge laufend
+3. Pi rebooten ohne angesteckte Node → Service wartet, kein Crashloop
+4. Node während Boot anstecken → Service startet im Moment des Device-Erscheinens
+
+`restart: always` im compose-File (statt `unless-stopped`) ist eine zusätzliche Schicht — fängt Container-interne Crashes ab, während der systemd-Wrapper Device-Disconnects abfängt.
 
 ## WLAN Access Point (Einsatz-Modus)
 

@@ -20,3 +20,7 @@ FEATURE-REQUEST-*
 # Backup-Tarballs
 *.tar.gz
 meshmonitor-data-backup-*.tar.gz
+
+# Overlays-Whitelist (nur Example-Files committen — historischer Leak-Befund 2026-05-05)
+overlays/*.geojson
+!overlays/example-*.geojson
