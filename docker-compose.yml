@@ -21,7 +21,9 @@ services:
       - /dev/meshtastic:/dev/ttyACM0
     ports:
       - "4403:4403"
-    restart: always
+    # restart: "no" — Lifecycle wird vom systemd-Wrapper (meshtastic-serial-bridge.service)
+    # gesteuert. restart: always würde bei Device-Mount-Failure einen Crashloop erzeugen.
+    restart: "no"
     environment:
       - SERIAL_DEVICE=/dev/ttyACM0
       - BAUD_RATE=115200

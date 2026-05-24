@@ -167,7 +167,7 @@ sudo systemctl enable --now meshtastic-serial-bridge.service
 3. Pi rebooten ohne angesteckte Node → Service wartet, kein Crashloop
 4. Node während Boot anstecken → Service startet im Moment des Device-Erscheinens
 
-`restart: always` im compose-File (statt `unless-stopped`) ist eine zusätzliche Schicht — fängt Container-interne Crashes ab, während der systemd-Wrapper Device-Disconnects abfängt.
+**Wichtig — `restart: "no"` für serial-bridge im compose:** Der Lifecycle wird komplett vom systemd-Wrapper gesteuert. `restart: always` oder `unless-stopped` würden bei Device-Mount-Failure (Node nicht angesteckt beim Boot) einen Docker-Crashloop erzeugen, der vom systemd-Wrapper nicht abgefangen werden kann. Die anderen Container (`meshmonitor`, `caddy`, `tileserver`) behalten ihre `restart: unless-stopped`/`always`-Policies — die sind device-unabhängig.
 
 ## WLAN Access Point (Einsatz-Modus)
 
