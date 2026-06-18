@@ -111,12 +111,15 @@ Damit die Node unabhängig von der USB-Reihenfolge gefunden wird:
 `/etc/udev/rules.d/99-meshtastic.rules`:
 
 ```
+# Meshtastic-Nodes — erzeugen Symlink /dev/meshtastic + triggern systemd-Service
+# TAG+="systemd" exponiert das Device als dev-meshtastic.device-Unit für BindsTo=
+# ENV{SYSTEMD_WANTS}="..." startet den Service automatisch beim Device-Erscheinen (Cold- und Hotplug)
 # ESP32-S3 (Heltec MeshPocket, LilyGO T-Deck Plus)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="meshtastic", TAG+="systemd", ENV{SYSTEMD_WANTS}="meshtastic-serial-bridge.service"
 # nRF52840, SenseCAP T1000-E
-SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="8029", SYMLINK+="meshtastic"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="8029", SYMLINK+="meshtastic", TAG+="systemd", ENV{SYSTEMD_WANTS}="meshtastic-serial-bridge.service"
 # nRF52840, LilyGO T-Echo (Adafruit-Vendor, eink-Variante)
-SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="4405", SYMLINK+="meshtastic"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="239a", ATTRS{idProduct}=="4405", SYMLINK+="meshtastic", TAG+="systemd", ENV{SYSTEMD_WANTS}="meshtastic-serial-bridge.service"
 ```
 
 ```bash
@@ -136,8 +139,8 @@ Saubere Lösung: ein systemd-Service als Wrapper, der den Container-Lifecycle di
 
 ```ini
 [Unit]
-Description=Meshtastic Serial Bridge Container
-Requires=docker.service dev-meshtastic.device
+Description=Meshtastic Serial Bridge Container (Lifecycle-bound to /dev/meshtastic)
+Requires=docker.service
 After=docker.service dev-meshtastic.device
 BindsTo=dev-meshtastic.device
 
@@ -148,16 +151,22 @@ WorkingDirectory=/home/tomkenobi/meshmonitor
 ExecStart=/usr/bin/docker compose up -d serial-bridge
 ExecStop=/usr/bin/docker compose stop serial-bridge
 
-[Install]
-WantedBy=multi-user.target
+# BEWUSST KEIN [Install]/WantedBy:
+# Aktivierung erfolgt ausschließlich udev-getriggert (SYSTEMD_WANTS in 99-meshtastic.rules).
+# Ein WantedBy=multi-user.target würde bei jedem Boot ohne Node einen 90-s-Geräte-Timeout auslösen.
 ```
 
-Aktivieren:
+> **Vorfall 2026-05-31 → 2026-06-18:** Mit `[Install] WantedBy=multi-user.target` versucht systemd den Dienst bei **jedem** Boot zu starten. Steckt keine Node, läuft der dadurch erzeugte `dev-meshtastic.device`-Job in den `DefaultDeviceTimeout` (~90 s) — sichtbar als ~90 s schwarzer Bildschirm nach dem Login. Deshalb **kein `[Install]` und kein `enable`**: die Aktivierung läuft komplett über `SYSTEMD_WANTS` aus der udev-Regel (Cold- und Hotplug funktionieren weiterhin), `BindsTo` stoppt bei Unplug.
+
+Aktivieren (rein udev-getriggert, **nicht** `enable`-n):
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now meshtastic-serial-bridge.service
+sudo udevadm control --reload-rules
+sudo udevadm trigger
 ```
+
+> War der Dienst zuvor `enable`-d, zuerst `sudo systemctl disable meshtastic-serial-bridge.service` ausführen (entfernt den `multi-user.target.wants`-Symlink), **dann** den `[Install]`-Abschnitt aus der Unit nehmen.
 
 `BindsTo=dev-meshtastic.device` ist der entscheidende Direktiv: systemd beobachtet den udev-Symlink `/dev/meshtastic` und triggert Service-Lifecycle-Events synchron mit dem Device. **Voraussetzung:** udev-Regel oben erzeugt diesen Symlink für die jeweilige Node-Vendor:Product-Kombination.
 
